@@ -29,6 +29,32 @@ pub(crate) struct Context(web_sys::Gpu);
 unsafe impl Send for Context {}
 unsafe impl Sync for Context {}
 
+enum WindowOrWorkerContext {
+    Window(web_sys::Window),
+    WorkerGlobalScope(web_sys::WorkerGlobalScope),
+}
+
+impl WindowOrWorkerContext {
+    pub(self) fn gpu(&self) -> web_sys::Gpu {
+        match self {
+            Self::Window(window) => window.navigator().gpu(),
+            Self::WorkerGlobalScope(worker) => worker.navigator().gpu(),
+        }
+    }
+}
+
+pub(self) fn window_or_worker_context() -> Option<WindowOrWorkerContext> {
+    js_sys::global()
+        .dyn_into::<web_sys::Window>()
+        .map(Self::Window)
+        .or_else(|global| {
+            global
+                .dyn_into::<web_sys::WorkerGlobalScope>()
+                .map(Self::WorkerGlobalScope)
+        })
+        .ok()
+}
+
 impl fmt::Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Context").field("type", &"Web").finish()
@@ -1010,7 +1036,11 @@ impl crate::Context for Context {
         MakeSendFuture<wasm_bindgen_futures::JsFuture, fn(JsFutureResult) -> Option<crate::Error>>;
 
     fn init(_backends: wgt::Backends) -> Self {
-        Context(web_sys::window().unwrap().navigator().gpu())
+        Context(
+            window_or_worker_context()
+                .expect("`self` does not refer to a `Window` or `WorkerGlobalScope`")
+                .gpu(),
+        )
     }
 
     fn instance_create_surface(
